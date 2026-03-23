@@ -1,0 +1,19 @@
+{
+  "query": "Revenue Trend Analysis",
+  "executed_at": "2026-03-23T14:47:27.037428",
+  "total_rows": 2,
+  "columns": [
+    "order_month",
+    "total_orders",
+    "total_items_sold",
+    "gross_revenue",
+    "total_payment_received",
+    "avg_item_value",
+    "avg_delivery_days",
+    "late_delivery_rate_pct",
+    "unique_customers",
+    "unique_products_sold",
+    "unique_sellers"
+  ],
+  "output_file": "/home/jovyan/work/output/query_1_revenue_trend_analysis_20260323_144727.csv"
+}

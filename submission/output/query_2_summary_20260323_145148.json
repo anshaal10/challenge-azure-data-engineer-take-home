@@ -1,0 +1,22 @@
+{
+  "query": "Seller Performance Scorecard",
+  "executed_at": "2026-03-23T14:51:48.636475",
+  "total_rows": 22,
+  "columns": [
+    "seller_key",
+    "seller_id",
+    "seller_city",
+    "seller_state",
+    "total_orders",
+    "total_items_sold",
+    "total_revenue",
+    "avg_item_value",
+    "unique_customers",
+    "avg_items_per_order",
+    "avg_delivery_days",
+    "late_delivery_rate_pct",
+    "successful_delivery_rate_pct",
+    "revenue_rank"
+  ],
+  "output_file": "/home/jovyan/work/output/query_2_seller_performance_scorecard_20260323_145148.csv"
+}

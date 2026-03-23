@@ -1,0 +1,38 @@
+{
+  "orders_last_run": {
+    "timestamp": "2026-03-23T13:57:09.966762",
+    "status": "completed",
+    "records_ingested": 22,
+    "total_records": 1044
+  },
+  "order_items_last_run": {
+    "timestamp": "2026-03-23T13:57:14.770061",
+    "status": "completed",
+    "records_ingested": 1000,
+    "total_records": 3000
+  },
+  "customers_last_run": {
+    "timestamp": "2026-03-23T13:57:17.963784",
+    "status": "completed",
+    "records_ingested": 1000,
+    "total_records": 3000
+  },
+  "products_last_run": {
+    "timestamp": "2026-03-23T13:57:26.274407",
+    "status": "completed",
+    "records_ingested": 1000,
+    "total_records": 3000
+  },
+  "sellers_last_run": {
+    "timestamp": "2026-03-23T13:57:29.098368",
+    "status": "completed",
+    "records_ingested": 1000,
+    "total_records": 3000
+  },
+  "payments_last_run": {
+    "timestamp": "2026-03-23T13:57:32.968008",
+    "status": "completed",
+    "records_ingested": 1000,
+    "total_records": 3000
+  }
+}
