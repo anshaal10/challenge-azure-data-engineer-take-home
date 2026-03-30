@@ -238,4 +238,215 @@ We assess the following, roughly in order of importance:
 
 ---
 
+## Challenges & Solutions Encountered
+
+This section documents key challenges encountered during development and the strategies used to resolve them.
+
+### Challenge 1: API Resilience & Authentication Management
+
+**Problem:** The API intentionally returns intermittent 500 errors, 429 rate limits, and 401 authentication failures. Implementing robust retry logic with exponential backoff while managing token refresh proved complex.
+
+**Solution:**
+- Implemented a dedicated `TokenManager` class that handles token lifecycle management with automatic refresh on 401 responses
+- Built a `retry_with_backoff` decorator supporting configurable:
+  - Maximum retries (default: 5)
+  - Base delay (0.5s), max delay (30s), and exponential multiplier (2.0)
+  - Specific HTTP status codes to retry (500, 429)
+- Added request logging and detailed error reporting to diagnose API issues
+- Implemented request throttling to respect rate limits proactively before hitting 429 responses
+
+**Key Trade-offs:**
+- Chose exponential backoff over linear backoff — exponential respects rate limits better and reduces thundering herd when API recovers
+- Set max retries to 5 to balance resilience against pipeline runtime
+- Log all retries to `app/logs/` for observability — production would integrate with centralized monitoring
+
+### Challenge 2: Handling Pagination Across Large Datasets
+
+**Problem:** Six data endpoints with unknown total record counts required reliable pagination. Missing the last page or double-fetching pages would corrupt the dataset.
+
+**Solution:**
+- Implemented cursor-based pagination tracking in a manifest file (`pipeline_manifest.json`)
+- For each endpoint, stored: endpoint name, last successfully processed page, timestamp, and record count
+- Built idempotency logic: before fetching page N, verify it hasn't been successfully ingested in the current run
+- Used deterministic ordering (by timestamp and ID where available) to ensure consistent pagination
+
+**Bronze Layer Output:**
+- Each endpoint produces a separate CSV file with `_ingested_at` and `_source_endpoint` metadata columns
+- Append-only bronze avoids overwriting historical data
+- New ingestion runs only append records with newer `_ingested_at` timestamps
+
+### Challenge 3: Data Quality Issues in API Responses
+
+**Problem:** The API occasionally returns:
+- Null or missing required fields
+- Negative prices or freight values
+- order items with no matching order_id
+- Delivered dates before purchase dates
+- Malformed or incomplete JSON records
+
+**Solution:**
+- Implemented a comprehensive validation framework in Silver layer with `_is_valid` boolean flag
+- Created data quality checks:
+  - **Schema validation:** All required columns present and correct types
+  - **Business logic validation:** Prices ≥ 0, delivery_date ≥ purchase_date
+  - **Referential integrity checks:** order_item references valid order_id, order references valid customer/payment
+  - **Completeness checks:** Critical fields (customer_id, order_id, price) not null
+- Quarantine invalid records in the `_is_valid = False` rows rather than dropping silently
+- Log an ERROR for each invalid record with specific reasons (helps diagnose API/data issues)
+- Count invalid records per endpoint and report summary before Gold layer load
+
+**Example handling in Silver:**
+```python
+orders_clean = orders.withColumn(
+    "_is_valid",
+    (col("purchase_timestamp").isNotNull()) &
+    (col("customer_unique_id").isNotNull()) &
+    (col("order_status").isNotNull()) &
+    (coalesce(col("delivered_customer_date"), col("purchase_timestamp")) >= col("purchase_timestamp"))
+)
+```
+
+### Challenge 4: Deterministic Surrogate Key Generation
+
+**Problem:** Surrogate keys must be reproducible across pipeline runs (same input data → same keys). Using row numbers or sequences breaks idempotency.
+
+**Solution:**
+- Implemented hash-based surrogate key generation using MD5 hashing of natural keys
+- For `dim_customers`: hash `(customer_unique_id)` → deterministic customer_key
+- For `dim_products`: hash `(product_id)` → deterministic product_key
+- For `dim_sellers`: hash `(seller_id)` → deterministic seller_key
+- For `fact_order_items`: hash `(order_id, order_item_id)` → deterministic order_item_sk
+- Used Spark's built-in `md5(concat(...))` with 64-bit integer conversion (modulo 2^31-1) to fit within INT range
+
+**Trade-off:** Hash collisions extremely unlikely with MD5 on unique identifiers; if production needed guaranteed uniqueness per run, would use a sequence generator with run_id scope.
+
+### Challenge 5: Complex Payment Attribution to Order Items
+
+**Problem:** Requirements specify payment_value should be distributed across items proportionally by item price. Implementation required:
+- Finding the order total payment from the payments table
+- Matching each order_item to its order's total payment
+- Distributing that payment proportionally across items in the order
+
+**Solution:**
+- Window function approach:
+  1. Sum all `payment_value` per order_id from payments table
+  2. Sum all item `price` per order_id in order_items
+  3. For each item: `payment_value = (item.price / order.total_price) * order.total_payment`
+  4. Handle division-by-zero: if order total price is 0, distribute payment equally across items
+- Used Spark SQL window functions with `OVER (PARTITION BY order_id)` for efficiency
+
+### Challenge 6: Payment Type & Installment Selection Rules
+
+**Problem:** Orders can have multiple payment rows with different payment types and installment counts. Requirements:
+- **payment_type:** use the payment type with HIGHEST payment_value; if tied, take first alphabetically
+- **payment_installments:** use the MAXIMUM installment count across all payment rows for the order
+
+**Solution:**
+- Aggregated at order level post-payment join using:
+  - For payment_type: `FIRST(payment_type)` with `ORDER BY payment_value DESC, payment_type ASC`
+  - For installments: `MAX(payment_installments)`
+- Handled null installments (some payments have NULL) using `COALESCE(..., 0)`
+
+### Challenge 7: Dimensional Data with Slowly Changing Dimensions (Customer Location)
+
+**Problem:** Requirements specify customer dimensions should include "most recent" city/state/zip_code from the customer's most recent order. A customer may have moved or used different addresses across orders.
+
+**Solution:**
+- Ranked orders per customer by `purchase_timestamp DESC`
+- Selected the first (most recent) row to extract customer location
+- This creates a Type 1 slowly changing dimension (always reflect current/latest attribute)
+- Identified trade-off: losing historical customer location changes; production would implement Type 2 (versioned dimensions) if needed
+
+### Challenge 8: Query Performance on Large Datasets
+
+**Problem:**
+- Query 1 (Revenue Trend Analysis) requires monthly aggregations, ranking, and rolling averages
+- Query 2 (Seller Scorecard) requires percentile ranking across sellers
+
+**Solution:**
+- Used window functions extensively:
+  - `ROW_NUMBER() OVER (PARTITION BY year, month ORDER BY monthly_revenue DESC)` for monthly category ranking
+  - `PERCENT_RANK() OVER (ORDER BY metric)` for percentile calculations in seller scorecard
+- Filtered to rows meeting minimum thresholds (queries specify ≥10 transactions, ≥20 orders) early in WHERE clause
+- Avoided self-joins; used CTEs to calculate aggregates once and reuse
+
+Example pattern:
+```sql
+WITH monthly_revenue AS (
+  SELECT product_category_name, YEAR(...) as year, MONTH(...) as month,
+         SUM(price + freight_value) as monthly_revenue
+  FROM fact_order_items
+  WHERE _is_valid = true
+  GROUP BY 1, 2, 3
+  HAVING COUNT(DISTINCT order_id) >= 10
+)
+SELECT *, ROW_NUMBER() OVER (PARTITION BY year, month ORDER BY monthly_revenue DESC) as monthly_rank
+FROM monthly_revenue
+```
+
+### Challenge 9: Handling Null & Missing Values in Dimensions
+
+**Problem:** Product descriptions, weights, or seller zip codes can be null. Schema requires specific handling.
+
+**Solution:**
+- **product_category_name:** Use `COALESCE(product_category_name, 'unknown')` to replace nulls
+- **product_weight_g, product_volume_cm3:** Keep as NULL if not provided (represents missing data, not zero)
+- **product_volume_cm3:** Calculate as `length × height × width` only if all three dimensions present; otherwise NULL
+- **seller_zip, customer_zip:** Keep as NULL if not available (don't fabricate missing codes)
+
+This preserves data lineage and makes null-handling explicit in business logic.
+
+### Challenge 10: Testing & Validation
+
+**Problem:** Ensuring correctness without a reference implementation is difficult. Needed to validate:
+- No orphan foreign keys in fact table
+- Correct row counts and aggregations
+- Payment proportional distribution sums correctly per order
+
+**Solution:**
+- Built validation checks as final Gold layer step that:
+  1. Counts records per table and compares to expected ranges
+  2. Validates all `customer_key`, `product_key`, `seller_key` in `fact_order_items` exist in dimension tables
+  3. Spot-checks: sample rows, verify aggregate sums match intermediate calculations
+  4. Prints a validation report at pipeline completion
+- Created a test notebook that runs sample queries against Gold to verify correctness
+- Versioned outputs to track changes and manually inspected a few orders end-to-end through Bronze → Silver → Gold
+
+### Idempotency & Incremental Runs
+
+**Key Design Decision:** The pipeline is designed to be **idempotent** — running it twice against the same date range produces identical results:
+
+1. **Bronze:** Append-only; manifest file tracks which date ranges have been ingested
+2. **Silver:** Upsert logic based on natural keys (order_id, customer_id, product_id, seller_id); re-processing overwrites existing records with same natural key
+3. **Gold:** Deterministic surrogate key generation; star schema built fresh from current Silver state each run
+
+This enables:
+- Fault tolerance — if pipeline fails mid-run, re-running from a checkpoint completes successfully
+- Data backfills — re-processing a historical date range updates all downstream layers without duplicates
+- Incremental updates — only new/changed records in Silver flow to Gold
+
+---
+
+## Production Readiness (What Would Change)
+
+For deployment to Azure Data Factory, Azure Synapse, or Microsoft Fabric:
+
+1. **Scheduling:** Replace manual notebook execution with Azure Data Factory pipelines (`ScheduledTrigger`, hourly or daily)
+2. **Monitoring & Alerting:** Migrate from logging to Application Insights; add alerts for:
+   - Pipeline failures (Composite_Trigger → Alert Rule)
+   - Data quality issues (_is_valid count > threshold)
+   - SLA breaches (end-to-end runtime > expected time)
+3. **Security:**
+   - Move credentials to Azure Key Vault (instead of env variables)
+   - Use Azure Managed Identity for service principal authentication
+   - Implement network restrictions (Private Endpoint, VNet rules)
+4. **Performance:**
+   - Partition Gold tables by order_date for faster queries
+   - Use Delta Lake format (on Synapse/Databricks) for ACID guarantees and time-travel
+   - Cache intermediate Silver datasets to avoid re-computation
+5. **CI/CD:** GitOps workflow with PR validation (lint notebooks, unit test transformations, dry-run against test data)
+6. **Cost Optimization:** Resource cleanup (auto-scale Spark clusters), query cost analysis (Synapse Query Store), archive old Bronze data to Blob Storage tiers
+
+---
+
 *Good luck — we look forward to reviewing your work.*

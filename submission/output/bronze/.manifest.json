@@ -1,38 +1,56 @@
 {
   "orders_last_run": {
-    "timestamp": "2026-03-23T13:57:09.966762",
+    "timestamp": "2026-03-30T11:53:18.712701",
     "status": "completed",
     "records_ingested": 22,
-    "total_records": 1044
+    "records_duplicated": 978,
+    "records_errored": 0,
+    "total_records": 1088,
+    "total_quarantined": 0
   },
   "order_items_last_run": {
-    "timestamp": "2026-03-23T13:57:14.770061",
+    "timestamp": "2026-03-30T11:53:18.870102",
     "status": "completed",
     "records_ingested": 1000,
-    "total_records": 3000
+    "records_duplicated": 0,
+    "records_errored": 0,
+    "total_records": 5000,
+    "total_quarantined": 0
   },
   "customers_last_run": {
-    "timestamp": "2026-03-23T13:57:17.963784",
+    "timestamp": "2026-03-30T11:53:18.984962",
     "status": "completed",
     "records_ingested": 1000,
-    "total_records": 3000
+    "records_duplicated": 0,
+    "records_errored": 0,
+    "total_records": 5000,
+    "total_quarantined": 0
   },
   "products_last_run": {
-    "timestamp": "2026-03-23T13:57:26.274407",
+    "timestamp": "2026-03-30T11:53:19.130074",
     "status": "completed",
     "records_ingested": 1000,
-    "total_records": 3000
+    "records_duplicated": 0,
+    "records_errored": 0,
+    "total_records": 5000,
+    "total_quarantined": 0
   },
   "sellers_last_run": {
-    "timestamp": "2026-03-23T13:57:29.098368",
+    "timestamp": "2026-03-30T11:53:19.230447",
     "status": "completed",
     "records_ingested": 1000,
-    "total_records": 3000
+    "records_duplicated": 0,
+    "records_errored": 0,
+    "total_records": 5000,
+    "total_quarantined": 0
   },
   "payments_last_run": {
-    "timestamp": "2026-03-23T13:57:32.968008",
+    "timestamp": "2026-03-30T11:53:19.339761",
     "status": "completed",
     "records_ingested": 1000,
-    "total_records": 3000
+    "records_duplicated": 0,
+    "records_errored": 0,
+    "total_records": 5000,
+    "total_quarantined": 0
   }
 }
