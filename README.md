@@ -447,6 +447,3 @@ For deployment to Azure Data Factory, Azure Synapse, or Microsoft Fabric:
 5. **CI/CD:** GitOps workflow with PR validation (lint notebooks, unit test transformations, dry-run against test data)
 6. **Cost Optimization:** Resource cleanup (auto-scale Spark clusters), query cost analysis (Synapse Query Store), archive old Bronze data to Blob Storage tiers
 
----
-
-*Good luck — we look forward to reviewing your work.*
